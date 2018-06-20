@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <script>
+
+
+            function getKeys(point) {
+
+                // GeoJSON Array [longitude, latitude(, elevation)]
+                if (Object.prototype.toString.call(point) == '[object Array]') {
+
+                    return {
+                        longitude: point.length >= 1 ? 0 : undefined,
+                        latitude: point.length >= 2 ? 1 : undefined,
+                        elevation: point.length >= 3 ? 2 : undefined
+                    };
+
+                }
+
+                var getKey = function (possibleValues) {
+
+                    var key;
+
+                    possibleValues.every(function (val) {
+                        // TODO: check if point is an object
+                        if (typeof point != 'object') {
+                            return true;
+                        }
+                        return point.hasOwnProperty(val) ? (function () {
+                            key = val;
+                            return false;
+                        }()) : true;
+                    });
+
+                    return key;
+
+                };
+
+                var longitude = getKey(['lng', 'lon', 'longitude']);
+                var latitude = getKey(['lat', 'latitude']);
+                var elevation = getKey(['alt', 'altitude', 'elevation', 'elev']);
+
+                // return undefined if not at least one valid property was found
+                if (typeof latitude == 'undefined' &&
+                        typeof longitude == 'undefined' &&
+                        typeof elevation == 'undefined') {
+                    return undefined;
+                }
+
+                return {
+                    latitude: latitude,
+                    longitude: longitude,
+                    elevation: elevation
+                };
+
+            }
+
+            function coords(point, raw) {
+
+                var retval = {
+                    latitude: raw === true ? point[this.getKeys(point).latitude] : this.useDecimal(point[this.getKeys(point).latitude]),
+                    longitude: raw === true ? point[this.getKeys(point).longitude] : this.useDecimal(point[this.getKeys(point).longitude])
+                };
+
+                var elev = point[this.getKeys(point).elevation];
+
+                if (typeof elev !== 'undefined') {
+                    retval['elevation'] = elev;
+                }
+
+                return retval;
+
+            }
+
+            function getDistance(start, end, accuracy, precision) {
+
+                accuracy = Math.floor(accuracy) || 1;
+                precision = Math.floor(precision) || 0;
+
+                var s = this.coords(start);
+                var e = this.coords(end);
+
+                var a = 6378137;
+                var b = 6356752.314245;
+                var f = 1 / 298.257223563;  // WGS-84 ellipsoid params
+
+                var L = (e['longitude'] - s['longitude']).toRad();
+
+                var cosSigma, sigma, sinAlpha, cosSqAlpha, cos2SigmaM, sinSigma;
+
+                var U1 = Math.atan((1 - f) * Math.tan(parseFloat(s['latitude']).toRad()));
+                var U2 = Math.atan((1 - f) * Math.tan(parseFloat(e['latitude']).toRad()));
+                var sinU1 = Math.sin(U1), cosU1 = Math.cos(U1);
+                var sinU2 = Math.sin(U2), cosU2 = Math.cos(U2);
+
+                var lambda = L, lambdaP, iterLimit = 100;
+                do {
+                    var sinLambda = Math.sin(lambda), cosLambda = Math.cos(lambda);
+                    sinSigma = (
+                            Math.sqrt(
+                                    (
+                                            cosU2 * sinLambda
+                                            ) * (
+                                    cosU2 * sinLambda
+                                    ) + (
+                                    cosU1 * sinU2 - sinU1 * cosU2 * cosLambda
+                                    ) * (
+                                    cosU1 * sinU2 - sinU1 * cosU2 * cosLambda
+                                    )
+                                    )
+                            );
+                    if (sinSigma === 0) {
+                        return 0;  // co-incident points
+                    }
+
+                    cosSigma = sinU1 * sinU2 + cosU1 * cosU2 * cosLambda;
+                    sigma = Math.atan2(sinSigma, cosSigma);
+                    sinAlpha = cosU1 * cosU2 * sinLambda / sinSigma;
+                    cosSqAlpha = 1 - sinAlpha * sinAlpha;
+                    cos2SigmaM = cosSigma - 2 * sinU1 * sinU2 / cosSqAlpha;
+
+                    if (isNaN(cos2SigmaM)) {
+                        cos2SigmaM = 0;  // equatorial line: cosSqAlpha=0 (§6)
+                    }
+                    var C = (
+                            f / 16 * cosSqAlpha * (
+                                    4 + f * (
+                                            4 - 3 * cosSqAlpha
+                                            )
+                                    )
+                            );
+                    lambdaP = lambda;
+                    lambda = (
+                            L + (
+                                    1 - C
+                                    ) * f * sinAlpha * (
+                            sigma + C * sinSigma * (
+                                    cos2SigmaM + C * cosSigma * (
+                                            -1 + 2 * cos2SigmaM * cos2SigmaM
+                                            )
+                                    )
+                            )
+                            );
+
+                } while (Math.abs(lambda - lambdaP) > 1e-12 && --iterLimit > 0);
+
+                if (iterLimit === 0) {
+                    return NaN;  // formula failed to converge
+                }
+
+                var uSq = (
+                        cosSqAlpha * (
+                                a * a - b * b
+                                ) / (
+                        b * b
+                        )
+                        );
+
+                var A = (
+                        1 + uSq / 16384 * (
+                                4096 + uSq * (
+                                        -768 + uSq * (
+                                                320 - 175 * uSq
+                                                )
+                                        )
+                                )
+                        );
+
+                var B = (
+                        uSq / 1024 * (
+                                256 + uSq * (
+                                        -128 + uSq * (
+                                                74 - 47 * uSq
+                                                )
+                                        )
+                                )
+                        );
+
+                var deltaSigma = (
+                        B * sinSigma * (
+                                cos2SigmaM + B / 4 * (
+                                        cosSigma * (
+                                                -1 + 2 * cos2SigmaM * cos2SigmaM
+                                                ) - B / 6 * cos2SigmaM * (
+                                        -3 + 4 * sinSigma * sinSigma
+                                        ) * (
+                                        -3 + 4 * cos2SigmaM * cos2SigmaM
+                                        )
+                                        )
+                                )
+                        );
+
+                var distance = b * A * (sigma - deltaSigma);
+
+                distance = distance.toFixed(precision); // round to 1mm precision
+
+                //if (start.hasOwnProperty(elevation) && end.hasOwnProperty(elevation)) {
+                if (typeof this.elevation(start) !== 'undefined' && typeof this.elevation(end) !== 'undefined') {
+                    var climb = Math.abs(this.elevation(start) - this.elevation(end));
+                    distance = Math.sqrt(distance * distance + climb * climb);
+                }
+
+                return this.distance = Math.round(distance * Math.pow(10, precision) / accuracy) * accuracy / Math.pow(10, precision);
+
+                /*
+                 // note: to return initial/final bearings in addition to distance, use something like:
+                 var fwdAz = Math.atan2(cosU2*sinLambda,  cosU1*sinU2-sinU1*cosU2*cosLambda);
+                 var revAz = Math.atan2(cosU1*sinLambda, -sinU1*cosU2+cosU1*sinU2*cosLambda);
+                 
+                 return { distance: s, initialBearing: fwdAz.toDeg(), finalBearing: revAz.toDeg() };
+                 */
+
+            }
+
+            function isPointInCircle(latlng, center, radius) {
+                return this.getDistance(latlng, center) < radius;
+            }
+
+
+            // checks if 51.525, 7.4575 is within a radius of 5km from 51.5175, 7.4678
+            console.log(isPointInCircle(
+                    {latitude: 51.525, longitude: 7.4575},
+                    {latitude: 51.5175, longitude: 7.4678},
+                    5000
+                    ));
+        </script>
+        <title>
+            Test
+        </title>
+    </head>
+</html>
